@@ -3,6 +3,7 @@
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 
 class ImageViewer : public rclcpp::Node {
 public:
