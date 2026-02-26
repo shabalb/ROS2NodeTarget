@@ -1,0 +1,239 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="default">
+
+    <!-- свет -->
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -1</direction>
+    </light>
+
+    <!-- земля -->
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.42 0.6 0.86 1</ambient>
+            <diffuse>0.42 0.6 0.86 1</diffuse>
+            <specular>0.18 0.18 0.22 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="target_cube">
+        <pose> 2 0 0.5 0 0 0</pose>
+            <link name="link">
+              <collision name="collision">
+                <geometry>
+                  <box>
+                    <size>0.2 0.2 0.2</size>
+                  </box>
+                </geometry>
+              </collision>
+              <visual name="visual">
+                <geometry>
+                  <box>
+                    <size>0.2 0.2 0.2</size>
+                  </box>
+                </geometry>
+                <material>
+                  <ambient>1 0 0 1</ambient>
+                  <diffuse>1 0 0 1</diffuse>
+                </material>
+              </visual>
+            </link>
+        <static>false</static> <!-- важно, чтобы мог двигаться -->
+    </model>
+
+
+  <model name="diff_bot">
+    <static>false</static>
+    <pose>0 0 0.2 0 0 0</pose>
+
+    <!-- корпус -->
+    <link name="base_link">
+      <inertial><mass>5.0</mass></inertial>
+
+      <collision name="base_collision">
+        <geometry>
+          <box><size>0.4 0.3 0.2</size></box>
+        </geometry>
+      </collision>
+
+      <visual name="base_visual">
+        <material>
+          <ambient>0.42 0.6 0.86 1</ambient>
+          <diffuse>0.42 0.6 0.86 1</diffuse>
+          <specular>0.18 0.18 0.22 1</specular>
+        </material>
+        <geometry>
+          <box><size>0.4 0.3 0.2</size></box>
+        </geometry>
+      </visual>
+    </link>
+
+    <!-- плагин дифф-привода Gazebo Sim -->
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+
+      <wheel_separation>0.30</wheel_separation>
+      <wheel_radius>0.05</wheel_radius>
+
+      <!-- IMPORTANT: топик команд внутри Gazebo -->
+
+
+      <!-- <topic>/model/diff_bot/cmd_vel</topic> -->
+
+
+      <topic>/cmd_vel</topic>
+      <!-- публиковать одометрию -->
+      <odom_publish_frequency>30</odom_publish_frequency>
+      <!-- <odom_topic>/model/diff_bot/odometry</odom_topic> -->
+      <odom_topic>/model/diff_bot/odometry</odom_topic>
+      <!-- <tf_topic>/model/diff_bot/tf</tf_topic> -->
+      <tf_topic>/model/diff_bot/tf</tf_topic>
+
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+    </plugin>
+
+    <!-- колёса + joints -->
+<link name="left_wheel">
+  <!-- z = -0.05 чтобы колесо было снизу при base height 0.2 и wheel_radius 0.05 -->
+  <pose>0.1 0.15 -0.1 0 0 0</pose>
+  <inertial><mass>0.3</mass></inertial>
+
+  <collision name="col">
+    <!-- повернём цилиндр, чтобы его ось совпала с осью вращения (Y) -->
+    <pose>0 0 0 1.57079632679 0 0</pose>
+    <geometry>
+      <cylinder><radius>0.05</radius><length>0.02</length></cylinder>
+    </geometry>
+  </collision>
+
+  <visual name="vis">
+    <pose>0 0 0 1.57079632679 0 0</pose>
+    <material>
+      <ambient>0.42 0.6 0.86 1</ambient>
+      <diffuse>0.42 0.6 0.86 1</diffuse>
+      <specular>0.18 0.18 0.22 1</specular>
+    </material>
+    <geometry>
+      <cylinder><radius>0.05</radius><length>0.02</length></cylinder>
+    </geometry>
+  </visual>
+</link>
+
+<link name="right_wheel">
+  <pose>0.1 -0.15 -0.1 0 0 0</pose>
+  <inertial><mass>0.3</mass></inertial>
+
+  <collision name="col">
+    <pose>0 0 0 1.57079632679 0 0</pose>
+    <geometry>
+      <cylinder><radius>0.05</radius><length>0.02</length></cylinder>
+    </geometry>
+  </collision>
+
+  <visual name="vis">
+    <pose>0 0 0 1.57079632679 0 0</pose>
+    <material>
+      <ambient>0.42 0.6 0.86 1</ambient>
+      <diffuse>0.42 0.6 0.86 1</diffuse>
+      <specular>0.18 0.18 0.22 1</specular>
+    </material>
+    <geometry>
+      <cylinder><radius>0.05</radius><length>0.02</length></cylinder>
+    </geometry>
+  </visual>
+</link>
+
+<joint name="left_wheel_joint" type="revolute">
+  <parent>base_link</parent>
+  <child>left_wheel</child>
+  <axis>
+    <!-- ось вращения вокруг Y -->
+    <xyz>0 1 0</xyz>
+  </axis>
+</joint>
+
+<joint name="right_wheel_joint" type="revolute">
+  <parent>base_link</parent>
+  <child>right_wheel</child>
+  <axis>
+    <xyz>0 1 0</xyz>
+  </axis>
+</joint>
+
+<!-- пассивная опора (caster) -->
+<link name="caster_wheel">
+  <!-- немного сзади/спереди. Я поставил назад: x=-0.16 -->
+  <pose>-0.16 0 -0.10 0 0 0</pose>
+
+  <inertial>
+    <mass>0.05</mass>
+    <!-- грубо, но достаточно: шар -->
+    <inertia>
+      <ixx>0.00002</ixx> <iyy>0.00002</iyy> <izz>0.00002</izz>
+      <ixy>0</ixy> <ixz>0</ixz> <iyz>0</iyz>
+    </inertia>
+  </inertial>
+
+  <collision name="caster_col">
+    <geometry>
+      <sphere><radius>0.05</radius></sphere>
+    </geometry>
+    <!-- можно чуть уменьшить трение, чтобы легче поворачивался -->
+    <surface>
+      <friction>
+        <ode>
+          <mu>0.6</mu>
+          <mu2>0.6</mu2>
+        </ode>
+      </friction>
+    </surface>
+  </collision>
+
+  <visual name="caster_vis">
+    <material>
+      <ambient>0.1 0.1 0.1 1</ambient>
+      <diffuse>0.1 0.1 0.1 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+    </material>
+    <geometry>
+      <sphere><radius>0.05</radius></sphere>
+    </geometry>
+  </visual>
+</link>
+
+<!-- шарнир, чтобы опора могла свободно вращаться (пассивно катиться) -->
+<joint name="caster_joint" type="ball">
+  <parent>base_link</parent>
+  <child>caster_wheel</child>
+</joint>
+
+  </model>
+
+  </world>
+</sdf>
