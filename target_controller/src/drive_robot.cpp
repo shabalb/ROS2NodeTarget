@@ -15,7 +15,7 @@ public:
 private:
   void tick() {
     geometry_msgs::msg::Twist msg;
-    // пример: ехать вперёд и слегка поворачивать
+    
     msg.linear.x = 0.05;
     msg.angular.z = 0.05 * std::sin(t_);
     t_ += 0.05;

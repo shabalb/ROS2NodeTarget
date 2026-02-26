@@ -22,7 +22,7 @@ public:
   : Node("move_target"),
     t_(0.0)
   {
-    // Параметры (можно менять через ros2 param set)
+    
     this->declare_parameter<std::string>("world", "target_world");
     this->declare_parameter<std::string>("model", "target");
     this->declare_parameter<double>("radius", 1.5);
@@ -50,7 +50,7 @@ private:
     const auto omega  = this->get_parameter("omega").as_double();
     const auto z      = this->get_parameter("z").as_double();
 
-    // траектория
+    
     const double x = radius * std::cos(t_);
     const double y = radius * std::sin(t_);
     t_ += omega * dt_;
@@ -63,7 +63,7 @@ private:
     req.mutable_position()->set_y(y);
     req.mutable_position()->set_z(z);
 
-    // Важно: entity по имени модели
+    
     req.set_name(model);
 
     // Можно задать ориентацию (кватернион). Здесь оставим (0,0,0,1)
@@ -75,12 +75,12 @@ private:
     gz::msgs::Boolean rep;
     bool result = false;
 
-    // timeout 100 мс
+    
     bool sent = gz_node_.Request(srv, req, 100, rep, result);
 
     if (!sent || !result || !rep.data())
     {
-      // Не спамим каждую итерацию
+      
       static int c = 0;
       if ((c++ % 30) == 0)
       {

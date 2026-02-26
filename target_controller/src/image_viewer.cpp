@@ -8,7 +8,7 @@
 class ImageViewer : public rclcpp::Node {
 public:
   ImageViewer() : Node("image_viewer") {
-    // Параметр на случай, если топик другой
+    
     this->declare_parameter<std::string>("image_topic", "/camera/image");
     const auto topic = this->get_parameter("image_topic").as_string();
 
@@ -41,7 +41,7 @@ private:
         n_, msg->header.stamp.sec, msg->header.stamp.nanosec, msg->encoding.c_str());
     }
     try {
-      // В Gazebo часто приходит RGB8, но бывает BGR8 — обработаем оба случая
+      
       cv_bridge::CvImageConstPtr cv_ptr;
 
       if (msg->encoding == "rgb8") {
@@ -50,12 +50,12 @@ private:
         cv::cvtColor(cv_ptr->image, bgr, cv::COLOR_RGB2BGR);
         cv::imshow("camera", bgr);
       } else {
-        // Попробуем как BGR8 или как есть
+        
         cv_ptr = cv_bridge::toCvShare(msg, msg->encoding);
         cv::imshow("camera", cv_ptr->image);
       }
 
-      // Без waitKey окно не обновляется
+      
       cv::waitKey(1);
     } catch (const cv_bridge::Exception &e) {
       RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
