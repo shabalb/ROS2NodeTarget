@@ -10,6 +10,15 @@
 #include <cmath>
 #include <limits>
 
+struct Detection
+{
+  bool found = false;
+  cv::Rect bbox;
+  cv::Point2f center;
+  int cell_x = -1;
+  int cell_y = -1;
+};
+
 class ImageViewer : public rclcpp::Node
 {
 public:
@@ -59,7 +68,27 @@ private:
         cv_ptr = cv_bridge::toCvShare(msg, "rgb8");
         cv::Mat bgr;
         cv::cvtColor(cv_ptr->image, bgr, cv::COLOR_RGB2BGR);
+
         cv::imshow("camera", bgr);
+
+        // ищем квадрат и клетку (например, сетка 8x6)
+        auto det = detectRedSquareAndCell(bgr, 8, 6);
+
+        if (det.found)
+        {
+          cv::rectangle(bgr, det.bbox, cv::Scalar(0, 255, 0), 2);
+          cv::circle(bgr, det.center, 3, cv::Scalar(255, 255, 255), -1);
+
+          // подпись
+          std::string txt = "cell=(" + std::to_string(det.cell_x) + "," + std::to_string(det.cell_y) + ")";
+          cv::putText(bgr, txt, cv::Point(det.bbox.x, std::max(0, det.bbox.y - 8)),
+                      cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+
+          // чтобы не спамить лог
+          RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
+                               "Red square at px=(%.1f,%.1f) cell=(%d,%d)",
+                               det.center.x, det.center.y, det.cell_x, det.cell_y);
+        }
       }
       else
       {
@@ -80,7 +109,88 @@ private:
     }
   }
 
-  
+  static Detection detectRedSquareAndCell(
+      const cv::Mat &bgr,
+      int grid_cols,
+      int grid_rows)
+  {
+    Detection d;
+    if (bgr.empty())
+      return d;
+
+    cv::Mat hsv;
+    cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
+
+    // Красный: два диапазона Hue
+    cv::Mat mask1, mask2, mask;
+    cv::inRange(hsv, cv::Scalar(0, 80, 80), cv::Scalar(10, 255, 255), mask1);
+    cv::inRange(hsv, cv::Scalar(170, 80, 80), cv::Scalar(180, 255, 255), mask2);
+    mask = mask1 | mask2;
+
+    // Убираем шум
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    double bestScore = 0.0;
+    cv::Rect bestRect;
+    std::vector<cv::Point> bestApprox;
+
+    for (const auto &c : contours)
+    {
+      double area = cv::contourArea(c);
+      if (area < 400.0)
+        continue; // фильтр по площади (подстрой)
+
+      cv::Rect r = cv::boundingRect(c);
+      double aspect = (double)r.width / (double)r.height;
+      if (aspect < 0.8 || aspect > 1.25)
+        continue; // близко к квадрату
+
+      // Аппроксимация контура -> квадрат обычно даёт 4 вершины
+      std::vector<cv::Point> approx;
+      double peri = cv::arcLength(c, true);
+      cv::approxPolyDP(c, approx, 0.02 * peri, true);
+      if ((int)approx.size() != 4)
+        continue;
+      if (!cv::isContourConvex(approx))
+        continue;
+
+      // Скор: площадь * “квадратность”
+      double fill = area / (double)(r.area() + 1);
+      double score = area * fill;
+
+      if (score > bestScore)
+      {
+        bestScore = score;
+        bestRect = r;
+        bestApprox = approx;
+      }
+    }
+
+    if (bestScore <= 0.0)
+      return d;
+
+    d.found = true;
+    d.bbox = bestRect;
+    d.center = cv::Point2f(bestRect.x + bestRect.width * 0.5f,
+                           bestRect.y + bestRect.height * 0.5f);
+
+    // Определяем “клетку” сетки grid_cols x grid_rows
+    const int W = bgr.cols;
+    const int H = bgr.rows;
+
+    int cellW = std::max(1, W / grid_cols);
+    int cellH = std::max(1, H / grid_rows);
+
+    d.cell_x = std::clamp((int)(d.center.x / cellW), 0, grid_cols - 1);
+    d.cell_y = std::clamp((int)(d.center.y / cellH), 0, grid_rows - 1);
+
+    return d;
+  }
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_;
 };
@@ -182,11 +292,11 @@ private:
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<LidarViewer>());
+  //rclcpp::spin(std::make_shared<LidarViewer>());
   auto node = std::make_shared<ImageViewer>();
-  
+
   rclcpp::spin(node);
-  
+
   rclcpp::shutdown();
   return 0;
 }
