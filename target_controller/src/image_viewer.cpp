@@ -73,8 +73,10 @@ private:
         cv::imshow("camera", bgr);
 
         // ищем квадрат и клетку (например, сетка 8x6)
-        auto det = detectRedSquareAndCell(bgr, 8, 6);
-
+        auto det = detectRedSquareAndCell(bgr, 30, 30);
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
+                               "maxAspect %.1f",
+                                this->maxAspect);
         if (det.found)
         {
           cv::rectangle(bgr, det.bbox, cv::Scalar(0, 255, 0), 2);
@@ -110,7 +112,7 @@ private:
     }
   }
 
-  static Detection detectRedSquareAndCell(
+  Detection detectRedSquareAndCell(
       const cv::Mat &bgr,
       int grid_cols,
       int grid_rows)
@@ -139,7 +141,7 @@ private:
     double bestScore = 0.0;
     cv::Rect bestRect;
     std::vector<cv::Point> bestApprox;
-
+    double maxAspect = 0.;
     for (const auto &c : contours)
     {
       double area = cv::contourArea(c);
@@ -148,18 +150,22 @@ private:
 
       cv::Rect r = cv::boundingRect(c);
       double aspect = (double)r.width / (double)r.height;
-      if (aspect < 0.8 || aspect > 1.25)
+      if (aspect>maxAspect){
+        maxAspect = aspect;
+      }
+      if (aspect < 0.5 || aspect > 1.5)
         continue; // близко к квадрату
 
       // Аппроксимация контура -> квадрат обычно даёт 4 вершины
+      //*
       std::vector<cv::Point> approx;
       double peri = cv::arcLength(c, true);
       cv::approxPolyDP(c, approx, 0.02 * peri, true);
-      if ((int)approx.size() != 4)
+      if ((int)approx.size() >= 8)
         continue;
-      if (!cv::isContourConvex(approx))
+      if (!cv::isContourConvex(approx))//выпуклость
         continue;
-
+      //*/
       // Скор: площадь * “квадратность”
       double fill = area / (double)(r.area() + 1);
       double score = area * fill;
@@ -171,9 +177,9 @@ private:
         bestApprox = approx;
       }
     }
-
-    if (bestScore <= 0.0)
-      return d;
+    this->maxAspect = maxAspect;
+    //if (bestScore <= 0.0)
+    //  return d;
 
     d.found = true;
     d.bbox = bestRect;
@@ -268,6 +274,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_;
   std::string win_ = "Lidar 2D (contour)";
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  double maxAspect = 0.;
 };
 
 class LidarViewer : public rclcpp::Node
