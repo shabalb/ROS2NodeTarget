@@ -1,3 +1,4 @@
+#include <opencv2/core/types.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
@@ -21,6 +22,14 @@ struct Detection
   cv::Point2f center;
   int cell_x = -1;
   int cell_y = -1;
+};
+
+struct LidarPoint
+{//  в системе лидара
+    float x = 0.0f;      
+    float y = 0.0f;      
+    float range = 0.0f;  
+    float angle = 0.0f;  
 };
 
 class ImageViewer : public rclcpp::Node
@@ -82,7 +91,7 @@ private:
       processTogether(lidar_data, camera_data);
   }
 
-  void processTogether(std::vector<cv::Point> lidar_data, Detection camera_data)
+  void processTogether(std::vector<LidarPoint> lidar_data, Detection camera_data)
   {
       RCLCPP_INFO(this->get_logger(),
                   "Получили синхронизированную пару и обработали её");
@@ -108,7 +117,7 @@ private:
         cv::Mat bgr;
         cv::cvtColor(cv_ptr->image, bgr, cv::COLOR_RGB2BGR);
 
-        cv::imshow("camera", bgr);
+        //cv::imshow("camera", bgr);
 
         // ищем квадрат и клетку (например, сетка 8x6)
         auto det = detectRedSquareAndCell(bgr, 30, 30);
@@ -129,6 +138,9 @@ private:
           RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
                                "Red square at px=(%.1f,%.1f) cell=(%d,%d)",
                                det.center.x, det.center.y, det.cell_x, det.cell_y);
+          
+          cv::rectangle(bgr,det.bbox,cv::Scalar(0,255,0),2);
+          cv::imshow("camera", bgr);
           return det;
           
         }
@@ -240,8 +252,9 @@ private:
     return d;
   }
 
-  std::vector<cv::Point> onScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
+  std::vector<LidarPoint> onScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
   {
+    std::vector<LidarPoint> points;
     // Картинка 600x600, центр — робот
     const int W = 600, H = 600;
     cv::Mat img(H, W, CV_8UC3, cv::Scalar(15, 15, 15));
@@ -257,6 +270,7 @@ private:
     // Собираем точки контура
     std::vector<cv::Point> poly;
     poly.reserve(msg->ranges.size());
+    points.reserve(msg->ranges.size());
 
     float angle = msg->angle_min;
     for (size_t i = 0; i < msg->ranges.size(); ++i, angle += msg->angle_increment)
@@ -279,6 +293,7 @@ private:
         continue;
 
       poly.emplace_back(u, v);
+      points.push_back({x,y,r,angle});
     }
 
     // Рисуем контур: полилиния + точки
@@ -297,7 +312,7 @@ private:
     // Показ + обновление
     cv::imshow(win_, img);
     cv::waitKey(1);
-    return poly;
+    return points;
   }
 
   static void drawGrid(cv::Mat &img, const cv::Point &c, float px_per_m)
