@@ -31,7 +31,16 @@ public:
 
     this->declare_parameter<std::string>("image_topic", "/camera/image");
     const auto topic = this->get_parameter("image_topic").as_string();
-
+    
+    lidar_sub_.subscribe(this, "/scan");
+    camera_sub_.subscribe(this, topic);
+    sync_ = std::make_shared<Synchronizer>(
+        SyncPolicy(10), lidar_sub_, camera_sub_);
+    sync_->registerCallback(
+        std::bind(&ImageViewer::fusionCallback, this,
+                  std::placeholders::_1,
+                  std::placeholders::_2));
+    /*
     auto qos = rclcpp::QoS(rclcpp::KeepLast(5)).reliable();
     sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         topic, qos,
@@ -39,6 +48,7 @@ public:
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
         "/scan", rclcpp::SensorDataQoS(),
         std::bind(&ImageViewer::onScan, this, std::placeholders::_1));
+    */
     
     cv::namedWindow("camera", cv::WINDOW_NORMAL);
     RCLCPP_INFO(get_logger(), "Subscribed to: %s", topic.c_str());
@@ -54,9 +64,33 @@ public:
 private:
   size_t n_ = 0;
   rclcpp::Clock steady_{RCL_STEADY_TIME};
+  using SyncPolicy = message_filters::sync_policies::ApproximateTime<
+        sensor_msgs::msg::LaserScan,
+        sensor_msgs::msg::Image>;
+  using Synchronizer = message_filters::Synchronizer<SyncPolicy>;
 
-  void cb(const sensor_msgs::msg::Image::SharedPtr msg)
+  message_filters::Subscriber<sensor_msgs::msg::LaserScan> lidar_sub_;
+  message_filters::Subscriber<sensor_msgs::msg::Image> camera_sub_;
+  std::shared_ptr<Synchronizer> sync_;
+
+  void fusionCallback(
+        const sensor_msgs::msg::LaserScan::ConstSharedPtr & lidar_msg,
+        const sensor_msgs::msg::Image::ConstSharedPtr & camera_msg)
   {
+      auto lidar_data = onScan(lidar_msg);
+      auto camera_data = cb(camera_msg);
+      processTogether(lidar_data, camera_data);
+  }
+
+  void processTogether(std::vector<cv::Point> lidar_data, Detection camera_data)
+  {
+      RCLCPP_INFO(this->get_logger(),
+                  "Получили синхронизированную пару и обработали её");
+  }
+
+  Detection cb(const sensor_msgs::msg::Image::ConstSharedPtr msg)
+  {
+    Detection defDetect;
     n_++;
     if (n_ % 30 == 0)
     {
@@ -95,7 +129,7 @@ private:
           RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500,
                                "Red square at px=(%.1f,%.1f) cell=(%d,%d)",
                                det.center.x, det.center.y, det.cell_x, det.cell_y);
-
+          return det;
           
         }
       }
@@ -104,6 +138,7 @@ private:
 
         cv_ptr = cv_bridge::toCvShare(msg, msg->encoding);
         cv::imshow("camera", cv_ptr->image);
+        return defDetect;
       }
 
       cv::waitKey(1);
@@ -205,7 +240,7 @@ private:
     return d;
   }
 
-  void onScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
+  std::vector<cv::Point> onScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
   {
     // Картинка 600x600, центр — робот
     const int W = 600, H = 600;
@@ -262,6 +297,7 @@ private:
     // Показ + обновление
     cv::imshow(win_, img);
     cv::waitKey(1);
+    return poly;
   }
 
   static void drawGrid(cv::Mat &img, const cv::Point &c, float px_per_m)

@@ -12,6 +12,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(message_filters REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -30,7 +31,7 @@ add_executable(drive_robot src/drive_robot.cpp)
 add_executable(image_viewer src/image_viewer.cpp)
 ament_target_dependencies(move_target rclcpp )
 ament_target_dependencies(drive_robot rclcpp geometry_msgs)
-ament_target_dependencies(image_viewer rclcpp sensor_msgs cv_bridge)
+ament_target_dependencies(image_viewer rclcpp sensor_msgs cv_bridge message_filters)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
 
