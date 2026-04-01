@@ -2,6 +2,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -13,7 +14,8 @@
 #include <opencv2/opencv.hpp>
 
 #include <cmath>
-#include <limits>
+#include <chrono>
+#include <memory>
 
 struct Detection {
   bool found = false;
@@ -30,11 +32,15 @@ struct LidarPoint { //  в системе лидара
   float angle = 0.0f;
 };
 
-struct MotionCommand
-{
-    float linear = 0.0f;
-    float angular = 0.0f;
+struct MotionCommand {
+  float linear = 0.0f; // линейная скорость
+  float angular = 0.0f; // угловая скорость
 };
+
+// режимы преследования
+enum class FollowMode { SEARCH, ALIGN, FOLLOW, STOP, LOST };
+
+//using namespace std::chrono_literals;
 
 class ImageViewer : public rclcpp::Node {
 public:
@@ -50,6 +56,8 @@ public:
     sync_->registerCallback(std::bind(&ImageViewer::fusionCallback, this,
                                       std::placeholders::_1,
                                       std::placeholders::_2));
+    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    
     /*
     auto qos = rclcpp::QoS(rclcpp::KeepLast(5)).reliable();
     sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -77,6 +85,8 @@ private:
 
   message_filters::Subscriber<sensor_msgs::msg::LaserScan> lidar_sub_;
   message_filters::Subscriber<sensor_msgs::msg::Image> camera_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<Synchronizer> sync_;
 
   void
@@ -105,7 +115,6 @@ private:
       converted.push_back(cp);
     }
 
-    
     float W = 640;
     float FOV = 1.047;
     float fx = W / (2.0f * tan(FOV / 2.0f));
@@ -116,10 +125,11 @@ private:
 
     float theta_right = -atan2(u_left - cx, fx);
     float theta_left = -atan2(u_right - cx, fx);
-    
+
     if (theta_left > theta_right)
       std::swap(theta_left, theta_right);
-    RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f", theta_left,lidar_data[0].angle);
+    RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f", theta_left,
+                lidar_data[0].angle);
     std::vector<LidarPoint> result;
     for (const auto &p : lidar_data) {
       float angle = p.angle; // возможно + offset
@@ -128,19 +138,158 @@ private:
         result.push_back(p);
       }
     }
-    if (!result.empty()) {
+    if (!result.empty()) {// в result точки объекта. Далее нужно перенести в функцию
       float dist = result[0].range;
+      float mindistangle;
       for (const auto &p : result) {
         if (p.range < dist) {
           dist = p.range;
+          mindistangle = p.angle;
         }
       }
       RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
+
+      TargetState state = score(result, true);
+
+
+      //state.valid = true;
+      //state.lost = false;
+      //state.distance = dist;
+      //state.angle = mindistangle;
+      
+      FollowMode mode = decide(state);
+      MotionCommand cmd = compute(state, mode);
+      RCLCPP_INFO(this->get_logger(), "линейная скорость %f", cmd.linear);
+      sendCommand(cmd);
     }
 
     // RCLCPP_INFO(this->get_logger(),
     //             "Получили синхронизированную пару и обработали её");
   }
+
+
+
+  ///////////////////////// формирование команд
+
+  struct TargetState {// состояние цели
+    bool valid = false;   // найдена ли цель
+    bool lost = true;
+    float distance = 0.0f;   // расстояние до цели
+    float angle = 0.0f;   // угол до цели
+    float rel_x = 0.0f;   // вперед/назад относительно робота
+    float rel_y = 0.0f;   // вбок относительно робота
+  };
+
+  float desired_distance = 1.5f; // удерживаемое расстояние
+  float dist_deadband = 0.10f; // мертвая зона
+  float angle_deadband = 0.05f; // 
+
+  FollowMode decide(const TargetState &target) const {
+    if (!target.valid)
+      return FollowMode::LOST;
+
+    if (std::fabs(target.angle) > angle_deadband)
+      return FollowMode::ALIGN;
+
+    float dist_error = target.distance - desired_distance;
+
+    if (std::fabs(dist_error) < dist_deadband)
+      return FollowMode::STOP;
+
+    return FollowMode::FOLLOW;
+  }
+
+  float Kd = 0.8f; // по расстоянию
+  float Ka = 1.5f; // по углу
+
+  float max_linear = 0.05f;
+  float max_angular = 0.1f;
+
+  MotionCommand compute(const TargetState &target, FollowMode mode) const {
+    MotionCommand cmd;
+
+    if (!target.valid) {
+      // цель потеряна
+      cmd.linear = 0.0f;
+      cmd.angular = 0.0f;
+      return cmd;
+    }
+
+    float dist_error = target.distance - desired_distance;
+    float angle_error = target.angle;
+
+    switch (mode) {
+    case FollowMode::ALIGN:
+      cmd.linear = 0.0f;
+      cmd.angular = std::clamp(Ka * angle_error, -max_angular, max_angular);
+      break;
+
+    case FollowMode::FOLLOW:
+      if (std::fabs(dist_error) >= dist_deadband)
+        cmd.linear = std::clamp(Kd * dist_error, -max_linear, max_linear);
+
+      if (std::fabs(angle_error) >= angle_deadband)
+        cmd.angular = std::clamp(Ka * angle_error, -max_angular, max_angular);
+      break;
+
+    case FollowMode::STOP:
+      cmd.linear = 0.0f;
+      cmd.angular = 0.0f;
+      break;
+
+    case FollowMode::SEARCH:
+    case FollowMode::LOST:
+      cmd.linear = 0.0f;
+      cmd.angular = 0.2f; // например медленно крутиться искать цель
+      break;
+    }
+
+    return cmd;
+  }
+
+  TargetState score(const std::vector<LidarPoint> &object_points,
+                       bool camera_found) {
+    TargetState state;
+
+    if (!camera_found || object_points.empty()) {
+      state.valid = false;
+      state.lost = true;
+      return state;
+    }
+
+    state.valid = true;
+    state.lost = false;
+    //state.matched_points = static_cast<int>(object_points.size());
+
+    // можно взять ближайшую точку
+    float min_range = object_points.front().range;
+    float best_angle = object_points.front().angle;
+
+    for (const auto &p : object_points) {
+      if (p.range < min_range) {
+        min_range = p.range;
+        best_angle = p.angle;
+      }
+    }
+
+    state.distance = min_range;
+    state.angle = best_angle;
+
+    return state;
+  }
+
+  void sendCommand(MotionCommand cmd)
+{
+    geometry_msgs::msg::Twist msg;
+    msg.linear.x = cmd.linear;
+    msg.angular.z = cmd.angular;
+    cmd_pub_->publish(msg);
+}
+
+
+////////////////////////////////////////////////////////////////
+
+
 
   Detection cb(const sensor_msgs::msg::Image::ConstSharedPtr msg) {
     Detection defDetect;

@@ -31,7 +31,7 @@ add_executable(drive_robot src/drive_robot.cpp)
 add_executable(image_viewer src/image_viewer.cpp)
 ament_target_dependencies(move_target rclcpp )
 ament_target_dependencies(drive_robot rclcpp geometry_msgs)
-ament_target_dependencies(image_viewer rclcpp sensor_msgs cv_bridge message_filters)
+ament_target_dependencies(image_viewer rclcpp sensor_msgs cv_bridge message_filters geometry_msgs)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
 
