@@ -14,8 +14,14 @@
 #include <opencv2/opencv.hpp>
 
 #include <cmath>
-#include <chrono>
+//#include <chrono>
 #include <memory>
+
+////////////////// параметры
+float CAMERA_WIDTH = 640;
+float CAMERA_FOV = 1.047;
+/////////////////
+
 
 struct Detection {
   bool found = false;
@@ -114,23 +120,32 @@ private:
       cp.z = p.x + t[0];  // глубина вперёд
       converted.push_back(cp);
     }
-
-    float W = 640;
-    float FOV = 1.047;
+    RCLCPP_INFO(this->get_logger(), "processTogether in");
+    RCLCPP_INFO(this->get_logger(), "check x %i, width %i", camera_data.bbox.x, camera_data.bbox.width);
+    float W = CAMERA_WIDTH;
+    float FOV = CAMERA_FOV;
     float fx = W / (2.0f * tan(FOV / 2.0f));
     float cx = W / 2.0f;
-
+    //RCLCPP_INFO(this->get_logger(), "check 1");
     float u_left = camera_data.bbox.x;
     float u_right = camera_data.bbox.x + camera_data.bbox.width;
-
+    //RCLCPP_INFO(this->get_logger(), "check 2");
     float theta_right = -atan2(u_left - cx, fx);
     float theta_left = -atan2(u_right - cx, fx);
-
-    if (theta_left > theta_right)
+    RCLCPP_INFO(this->get_logger(), "check 3");
+    if (theta_left > theta_right){
       std::swap(theta_left, theta_right);
-    RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f", theta_left,
+    }
+    RCLCPP_INFO(this->get_logger(), "check 4");
+    if (!lidar_data.empty()){
+      RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f", theta_left,
                 lidar_data[0].angle);
+    }else{
+      RCLCPP_INFO(this->get_logger(), "lidar_data is empty");
+    }
+    
     std::vector<LidarPoint> result;
+    RCLCPP_INFO(this->get_logger(), "select in");
     for (const auto &p : lidar_data) {
       float angle = p.angle; // возможно + offset
 
@@ -138,6 +153,7 @@ private:
         result.push_back(p);
       }
     }
+    RCLCPP_INFO(this->get_logger(), "cmd form in");
     if (!result.empty()) {// в result точки объекта. Далее нужно перенести в функцию
       float dist = result[0].range;
       float mindistangle;
@@ -148,7 +164,7 @@ private:
         }
       }
       RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
-
+      RCLCPP_INFO(this->get_logger(), "score in");
       TargetState state = score(result, true);
 
 
@@ -156,11 +172,13 @@ private:
       //state.lost = false;
       //state.distance = dist;
       //state.angle = mindistangle;
-      
+      RCLCPP_INFO(this->get_logger(), "decide in");
       FollowMode mode = decide(state);
+      RCLCPP_INFO(this->get_logger(), "compute in");
       MotionCommand cmd = compute(state, mode);
       RCLCPP_INFO(this->get_logger(), "линейная скорость %f", cmd.linear);
       sendCommand(cmd);
+      RCLCPP_INFO(this->get_logger(), "send out");
     }
 
     // RCLCPP_INFO(this->get_logger(),
@@ -202,12 +220,12 @@ private:
   float Kd = 0.8f; // по расстоянию
   float Ka = 1.5f; // по углу
 
-  float max_linear = 0.05f;
+  float max_linear = 0.02f;
   float max_angular = 0.1f;
 
   MotionCommand compute(const TargetState &target, FollowMode mode) const {
     MotionCommand cmd;
-
+    //RCLCPP_INFO(this->get_logger(), "compute in");
     if (!target.valid) {
       // цель потеряна
       cmd.linear = 0.0f;
