@@ -220,7 +220,7 @@ private:
   float Kd = 0.8f; // по расстоянию
   float Ka = 1.5f; // по углу
 
-  float max_linear = 0.02f;
+  float max_linear = 0.4f;
   float max_angular = 0.1f;
 
   MotionCommand compute(const TargetState &target, FollowMode mode) const {

@@ -72,13 +72,22 @@
 
       <link name="base_link">
         <inertial>
+          <pose>0 0 0 0 0 0</pose>
           <mass>5.0</mass>
+          <inertia>
+            <ixx>0.1625</ixx>
+            <iyy>0.25</iyy>
+            <izz>0.3125</izz>
+            <ixy>0.0</ixy>
+            <ixz>0.0</ixz>
+            <iyz>0.0</iyz>
+          </inertia>
         </inertial>
 
         <collision name="base_collision">
           <geometry>
             <box>
-              <size>0.4 0.3 0.2</size>
+              <size>0.4 0.3 0.12</size>
             </box>
           </geometry>
         </collision>
@@ -121,8 +130,17 @@
       <link name="left_wheel">
 
         <pose>0.1 0.15 -0.1 0 0 0</pose>
+        
         <inertial>
           <mass>0.3</mass>
+          <inertia>
+            <ixx>0.0001975</ixx>
+            <iyy>0.000375</iyy>
+            <izz>0.0001975</izz>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyz>0</iyz>
+          </inertia>
         </inertial>
 
         <collision name="col">
@@ -134,6 +152,14 @@
               <length>0.02</length>
             </cylinder>
           </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
         </collision>
 
         <visual name="vis">
@@ -154,8 +180,17 @@
 
       <link name="right_wheel">
         <pose>0.1 -0.15 -0.1 0 0 0</pose>
+        
         <inertial>
           <mass>0.3</mass>
+          <inertia>
+            <ixx>0.0001975</ixx>
+            <iyy>0.000375</iyy>
+            <izz>0.0001975</izz>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyz>0</iyz>
+          </inertia>
         </inertial>
 
         <collision name="col">
@@ -166,6 +201,14 @@
               <length>0.02</length>
             </cylinder>
           </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
         </collision>
 
         <visual name="vis">
@@ -229,8 +272,8 @@
           <surface>
             <friction>
               <ode>
-                <mu>0.6</mu>
-                <mu2>0.6</mu2>
+                <mu>0.05</mu>
+                <mu2>0.05</mu2>
               </ode>
             </friction>
           </surface>
