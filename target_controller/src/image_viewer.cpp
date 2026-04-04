@@ -14,15 +14,34 @@
 #include <opencv2/opencv.hpp>
 
 #include <cmath>
-// #include <chrono>
 #include <memory>
+
+#include "kalman.cpp"
 #include "visualize.cpp"
 
-#define QT false
+#define QT true
+#define CONTROL true
 
 ////////////////// параметры
 float CAMERA_WIDTH = 640;
 float CAMERA_FOV = 1.047;
+
+char const *LIDAR_TOPIC = "/scan";
+char const *CAMERA_TOPIC = "/camera/image";
+char const *TWIST_TOPIC = "/cmd_vel";
+
+float SHIFT[3] = {0, 0, 0.02};
+float ROTATE[3][3] = {{0, 0, 0.02}, {0, 0, 0.02}, {0, 0, 0.02}};
+
+float Kd = 0.8f; // по расстоянию
+float Ka = 1.5f; // по углу
+
+float max_linear = 0.4f; // скорость
+float max_angular = 0.1f;
+
+float desired_distance = 1.5f; // удерживаемое расстояние
+float dist_deadband = 0.10f;   // мертвая зона расстояния
+float angle_deadband = 0.05f;  // угла
 /////////////////
 
 struct Detection {
@@ -45,6 +64,15 @@ struct MotionCommand {
   float angular = 0.0f; // угловая скорость
 };
 
+struct TargetState {  // состояние цели
+  bool valid = false; // найдена ли цель
+  bool lost = true;
+  float distance = 0.0f; // расстояние до цели
+  float angle = 0.0f;    // угол до цели
+  float rel_x = 0.0f; // вперед/назад относительно робота
+  float rel_y = 0.0f; // вбок относительно робота
+};
+
 // режимы преследования
 enum class FollowMode { SEARCH, ALIGN, FOLLOW, STOP, LOST };
 
@@ -52,25 +80,22 @@ class ImageViewer : public rclcpp::Node {
 public:
   ImageViewer() : Node("image_viewer") {
 
-    this->declare_parameter<std::string>("image_topic", "/camera/image");
-    const auto topic = this->get_parameter("image_topic").as_string();
-
-    lidar_sub_.subscribe(this, "/scan");
-    camera_sub_.subscribe(this, topic);
+    lidar_sub_.subscribe(this, LIDAR_TOPIC);
+    camera_sub_.subscribe(this, CAMERA_TOPIC);
     sync_ =
         std::make_shared<Synchronizer>(SyncPolicy(10), lidar_sub_, camera_sub_);
     sync_->registerCallback(std::bind(&ImageViewer::fusionCallback, this,
                                       std::placeholders::_1,
                                       std::placeholders::_2));
     cmd_pub_ =
-        this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+        this->create_publisher<geometry_msgs::msg::Twist>(TWIST_TOPIC, 10);
 
 #if QT == true
     cv::namedWindow("camera", cv::WINDOW_NORMAL);
     cv::namedWindow(win_, cv::WINDOW_AUTOSIZE);
 #endif
 
-    RCLCPP_INFO(get_logger(), "Subscribed to: %s", topic.c_str());
+    RCLCPP_INFO(get_logger(), "Subscribed to: %s", CAMERA_TOPIC);
   }
 
   ~ImageViewer() override { cv::destroyAllWindows(); }
@@ -151,43 +176,33 @@ private:
     if (!result.empty()) { // в result точки объекта. Далее нужно перенести в
                            // функцию
       float dist = result[0].range;
-      //float mindistangle;
+      // float mindistangle;
       for (const auto &p : result) {
         if (p.range < dist) {
           dist = p.range;
-          //mindistangle = p.angle;
+          // mindistangle = p.angle;
         }
       }
-      // RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
-      // RCLCPP_INFO(this->get_logger(), "score in");
-      TargetState state = score(result, true);
-
-      // RCLCPP_INFO(this->get_logger(), "decide in");
-      FollowMode mode = decide(state);
-      // RCLCPP_INFO(this->get_logger(), "compute in");
-      MotionCommand cmd = compute(state, mode);
-      // RCLCPP_INFO(this->get_logger(), "линейная скорость %f", cmd.linear);
-      sendCommand(cmd);
-      // RCLCPP_INFO(this->get_logger(), "send out");
     }
+    // RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
+    // RCLCPP_INFO(this->get_logger(), "score in");
+    TargetState state = score(result, true);
+
+    RCLCPP_INFO(this->get_logger(), "state %d", state.valid);
+    FollowMode mode = decide(state);
+     RCLCPP_INFO(this->get_logger(), "статус %d", (int)mode);
+    MotionCommand cmd = compute(state, mode);
+     RCLCPP_INFO(this->get_logger(), "поворот %f", cmd.angular);
+#if CONTROL == true
+    sendCommand(cmd);
+#endif
+    // RCLCPP_INFO(this->get_logger(), "send out");
+
     // RCLCPP_INFO(this->get_logger(),
     //             "Получили синхронизированную пару и обработали её");
   }
 
   ///////////////////////// формирование команд
-
-  struct TargetState {  // состояние цели
-    bool valid = false; // найдена ли цель
-    bool lost = true;
-    float distance = 0.0f; // расстояние до цели
-    float angle = 0.0f;    // угол до цели
-    float rel_x = 0.0f; // вперед/назад относительно робота
-    float rel_y = 0.0f; // вбок относительно робота
-  };
-
-  float desired_distance = 1.5f; // удерживаемое расстояние
-  float dist_deadband = 0.10f;   // мертвая зона
-  float angle_deadband = 0.05f;  //
 
   FollowMode decide(const TargetState &target) const {
     if (!target.valid)
@@ -204,20 +219,14 @@ private:
     return FollowMode::FOLLOW;
   }
 
-  float Kd = 0.8f; // по расстоянию
-  float Ka = 1.5f; // по углу
-
-  float max_linear = 0.4f;
-  float max_angular = 0.1f;
-
   MotionCommand compute(const TargetState &target, FollowMode mode) const {
     MotionCommand cmd;
-    if (!target.valid) {
+    //if (!target.valid) {
       // цель потеряна
-      cmd.linear = 0.0f;
-      cmd.angular = 0.0f;
-      return cmd;
-    }
+      //cmd.linear = 0.0f;
+      //cmd.angular = 0.0f;
+      //return cmd;
+    //}
 
     float dist_error = target.distance - desired_distance;
     float angle_error = target.angle;
