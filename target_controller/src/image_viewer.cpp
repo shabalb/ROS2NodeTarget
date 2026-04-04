@@ -1,8 +1,8 @@
+#include <geometry_msgs/msg/twist.hpp>
 #include <opencv2/core/types.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <geometry_msgs/msg/twist.hpp>
 
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -14,14 +14,16 @@
 #include <opencv2/opencv.hpp>
 
 #include <cmath>
-//#include <chrono>
+// #include <chrono>
 #include <memory>
+#include "visualize.cpp"
+
+#define QT false
 
 ////////////////// параметры
 float CAMERA_WIDTH = 640;
 float CAMERA_FOV = 1.047;
 /////////////////
-
 
 struct Detection {
   bool found = false;
@@ -39,14 +41,12 @@ struct LidarPoint { //  в системе лидара
 };
 
 struct MotionCommand {
-  float linear = 0.0f; // линейная скорость
+  float linear = 0.0f;  // линейная скорость
   float angular = 0.0f; // угловая скорость
 };
 
 // режимы преследования
 enum class FollowMode { SEARCH, ALIGN, FOLLOW, STOP, LOST };
-
-//using namespace std::chrono_literals;
 
 class ImageViewer : public rclcpp::Node {
 public:
@@ -62,22 +62,15 @@ public:
     sync_->registerCallback(std::bind(&ImageViewer::fusionCallback, this,
                                       std::placeholders::_1,
                                       std::placeholders::_2));
-    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-    
-    /*
-    auto qos = rclcpp::QoS(rclcpp::KeepLast(5)).reliable();
-    sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-        topic, qos,
-        std::bind(&ImageViewer::cb, this, std::placeholders::_1));
-    scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        "/scan", rclcpp::SensorDataQoS(),
-        std::bind(&ImageViewer::onScan, this, std::placeholders::_1));
-    */
+    cmd_pub_ =
+        this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
+#if QT == true
     cv::namedWindow("camera", cv::WINDOW_NORMAL);
-    RCLCPP_INFO(get_logger(), "Subscribed to: %s", topic.c_str());
-
     cv::namedWindow(win_, cv::WINDOW_AUTOSIZE);
+#endif
+
+    RCLCPP_INFO(get_logger(), "Subscribed to: %s", topic.c_str());
   }
 
   ~ImageViewer() override { cv::destroyAllWindows(); }
@@ -121,31 +114,32 @@ private:
       converted.push_back(cp);
     }
     RCLCPP_INFO(this->get_logger(), "processTogether in");
-    RCLCPP_INFO(this->get_logger(), "check x %i, width %i", camera_data.bbox.x, camera_data.bbox.width);
+    RCLCPP_INFO(this->get_logger(), "check x %i, width %i", camera_data.bbox.x,
+                camera_data.bbox.width);
     float W = CAMERA_WIDTH;
     float FOV = CAMERA_FOV;
     float fx = W / (2.0f * tan(FOV / 2.0f));
     float cx = W / 2.0f;
-    //RCLCPP_INFO(this->get_logger(), "check 1");
+    // RCLCPP_INFO(this->get_logger(), "check 1");
     float u_left = camera_data.bbox.x;
     float u_right = camera_data.bbox.x + camera_data.bbox.width;
-    //RCLCPP_INFO(this->get_logger(), "check 2");
+    // RCLCPP_INFO(this->get_logger(), "check 2");
     float theta_right = -atan2(u_left - cx, fx);
     float theta_left = -atan2(u_right - cx, fx);
-    RCLCPP_INFO(this->get_logger(), "check 3");
-    if (theta_left > theta_right){
+    // RCLCPP_INFO(this->get_logger(), "check 3");
+    if (theta_left > theta_right) {
       std::swap(theta_left, theta_right);
     }
-    RCLCPP_INFO(this->get_logger(), "check 4");
+    // RCLCPP_INFO(this->get_logger(), "check 4");
+    /*
     if (!lidar_data.empty()){
-      RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f", theta_left,
-                lidar_data[0].angle);
-    }else{
-      RCLCPP_INFO(this->get_logger(), "lidar_data is empty");
-    }
-    
+      RCLCPP_INFO(this->get_logger(), "theta_left %f, lidarPoints %f",
+    theta_left, lidar_data[0].angle); }else{ RCLCPP_INFO(this->get_logger(),
+    "lidar_data is empty");
+    }*/
+
     std::vector<LidarPoint> result;
-    RCLCPP_INFO(this->get_logger(), "select in");
+    // RCLCPP_INFO(this->get_logger(), "select in");
     for (const auto &p : lidar_data) {
       float angle = p.angle; // возможно + offset
 
@@ -153,54 +147,47 @@ private:
         result.push_back(p);
       }
     }
-    RCLCPP_INFO(this->get_logger(), "cmd form in");
-    if (!result.empty()) {// в result точки объекта. Далее нужно перенести в функцию
+    // RCLCPP_INFO(this->get_logger(), "cmd form in");
+    if (!result.empty()) { // в result точки объекта. Далее нужно перенести в
+                           // функцию
       float dist = result[0].range;
-      float mindistangle;
+      //float mindistangle;
       for (const auto &p : result) {
         if (p.range < dist) {
           dist = p.range;
-          mindistangle = p.angle;
+          //mindistangle = p.angle;
         }
       }
-      RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
-      RCLCPP_INFO(this->get_logger(), "score in");
+      // RCLCPP_INFO(this->get_logger(), "минимальное расстояние %f", dist);
+      // RCLCPP_INFO(this->get_logger(), "score in");
       TargetState state = score(result, true);
 
-
-      //state.valid = true;
-      //state.lost = false;
-      //state.distance = dist;
-      //state.angle = mindistangle;
-      RCLCPP_INFO(this->get_logger(), "decide in");
+      // RCLCPP_INFO(this->get_logger(), "decide in");
       FollowMode mode = decide(state);
-      RCLCPP_INFO(this->get_logger(), "compute in");
+      // RCLCPP_INFO(this->get_logger(), "compute in");
       MotionCommand cmd = compute(state, mode);
-      RCLCPP_INFO(this->get_logger(), "линейная скорость %f", cmd.linear);
+      // RCLCPP_INFO(this->get_logger(), "линейная скорость %f", cmd.linear);
       sendCommand(cmd);
-      RCLCPP_INFO(this->get_logger(), "send out");
+      // RCLCPP_INFO(this->get_logger(), "send out");
     }
-
     // RCLCPP_INFO(this->get_logger(),
     //             "Получили синхронизированную пару и обработали её");
   }
 
-
-
   ///////////////////////// формирование команд
 
-  struct TargetState {// состояние цели
-    bool valid = false;   // найдена ли цель
+  struct TargetState {  // состояние цели
+    bool valid = false; // найдена ли цель
     bool lost = true;
-    float distance = 0.0f;   // расстояние до цели
-    float angle = 0.0f;   // угол до цели
-    float rel_x = 0.0f;   // вперед/назад относительно робота
-    float rel_y = 0.0f;   // вбок относительно робота
+    float distance = 0.0f; // расстояние до цели
+    float angle = 0.0f;    // угол до цели
+    float rel_x = 0.0f; // вперед/назад относительно робота
+    float rel_y = 0.0f; // вбок относительно робота
   };
 
   float desired_distance = 1.5f; // удерживаемое расстояние
-  float dist_deadband = 0.10f; // мертвая зона
-  float angle_deadband = 0.05f; // 
+  float dist_deadband = 0.10f;   // мертвая зона
+  float angle_deadband = 0.05f;  //
 
   FollowMode decide(const TargetState &target) const {
     if (!target.valid)
@@ -225,7 +212,6 @@ private:
 
   MotionCommand compute(const TargetState &target, FollowMode mode) const {
     MotionCommand cmd;
-    //RCLCPP_INFO(this->get_logger(), "compute in");
     if (!target.valid) {
       // цель потеряна
       cmd.linear = 0.0f;
@@ -258,7 +244,7 @@ private:
     case FollowMode::SEARCH:
     case FollowMode::LOST:
       cmd.linear = 0.0f;
-      cmd.angular = 0.2f; // например медленно крутиться искать цель
+      cmd.angular = 0.2f; // медленно крутиться искать цель
       break;
     }
 
@@ -266,7 +252,7 @@ private:
   }
 
   TargetState score(const std::vector<LidarPoint> &object_points,
-                       bool camera_found) {
+                    bool camera_found) {
     TargetState state;
 
     if (!camera_found || object_points.empty()) {
@@ -277,7 +263,6 @@ private:
 
     state.valid = true;
     state.lost = false;
-    //state.matched_points = static_cast<int>(object_points.size());
 
     // можно взять ближайшую точку
     float min_range = object_points.front().range;
@@ -296,18 +281,14 @@ private:
     return state;
   }
 
-  void sendCommand(MotionCommand cmd)
-{
+  void sendCommand(MotionCommand cmd) {
     geometry_msgs::msg::Twist msg;
     msg.linear.x = cmd.linear;
     msg.angular.z = cmd.angular;
     cmd_pub_->publish(msg);
-}
+  }
 
-
-////////////////////////////////////////////////////////////////
-
-
+  ////////////////////////////////////////////////////////////////
 
   Detection cb(const sensor_msgs::msg::Image::ConstSharedPtr msg) {
     Detection defDetect;
@@ -350,22 +331,34 @@ private:
                                det.cell_y);
 
           cv::rectangle(bgr, det.bbox, cv::Scalar(0, 255, 0), 2);
+
+#if QT == true
           cv::imshow("camera", bgr);
+#endif
+
           return det;
         }
       } else {
 
         cv_ptr = cv_bridge::toCvShare(msg, msg->encoding);
+
+#if QT == true
         cv::imshow("camera", cv_ptr->image);
+#endif
+
         return defDetect;
       }
-
+#if QT == true
       cv::waitKey(1);
+#endif
     } catch (const cv_bridge::Exception &e) {
       RCLCPP_ERROR(get_logger(), "cv_bridge exception: %s", e.what());
+      return defDetect;
     } catch (const cv::Exception &e) {
       RCLCPP_ERROR(get_logger(), "OpenCV exception: %s", e.what());
+      return defDetect;
     }
+    return defDetect;
   }
 
   Detection detectRedSquareAndCell(const cv::Mat &bgr, int grid_cols,
@@ -455,6 +448,8 @@ private:
   onScan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg) {
     std::vector<LidarPoint> points;
     // Картинка 600x600, центр — робот
+
+#if QT == true
     const int W = 600, H = 600;
     cv::Mat img(H, W, CV_8UC3, cv::Scalar(15, 15, 15));
 
@@ -465,6 +460,7 @@ private:
 
     // сетка (опционально)
     drawGrid(img, center, px_per_m);
+#endif
 
     // Собираем точки контура
     std::vector<cv::Point> poly;
@@ -483,6 +479,7 @@ private:
       float x = r * std::cos(angle);
       float y = r * std::sin(angle);
 
+#if QT == true
       // экранные координаты: +x вправо, +y вверх (поэтому y инвертируем)
       int u = static_cast<int>(center.x + x * px_per_m);
       int v = static_cast<int>(center.y - y * px_per_m);
@@ -492,9 +489,11 @@ private:
         continue;
 
       poly.emplace_back(u, v);
+#endif
+
       points.push_back({x, y, r, angle});
     }
-
+#if QT == true
     // Рисуем контур: полилиния + точки
     if (poly.size() >= 2) {
       cv::polylines(img, poly, false, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
@@ -509,19 +508,9 @@ private:
     // Показ + обновление
     cv::imshow(win_, img);
     cv::waitKey(1);
-    return points;
-  }
+#endif
 
-  static void drawGrid(cv::Mat &img, const cv::Point &c, float px_per_m) {
-    // окружности каждые 1м и оси
-    for (int m = 1; m <= 10; ++m) {
-      int r = static_cast<int>(m * px_per_m);
-      cv::circle(img, c, r, cv::Scalar(40, 40, 40), 1, cv::LINE_AA);
-    }
-    cv::line(img, cv::Point(0, c.y), cv::Point(img.cols, c.y),
-             cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
-    cv::line(img, cv::Point(c.x, 0), cv::Point(c.x, img.rows),
-             cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
+    return points;
   }
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_;
