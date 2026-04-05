@@ -79,11 +79,11 @@ enum class FollowMode { SEARCH, ALIGN, FOLLOW, STOP, LOST };
 class ImageViewer : public rclcpp::Node {
 public:
   ImageViewer() : Node("image_viewer") {
-
-    lidar_sub_.subscribe(this, LIDAR_TOPIC);
-    camera_sub_.subscribe(this, CAMERA_TOPIC);
+    auto qos = rclcpp::SensorDataQoS();
+    lidar_sub_.subscribe(this, LIDAR_TOPIC, qos.get_rmw_qos_profile());
+    camera_sub_.subscribe(this, CAMERA_TOPIC, qos.get_rmw_qos_profile());
     sync_ =
-        std::make_shared<Synchronizer>(SyncPolicy(10), lidar_sub_, camera_sub_);
+        std::make_shared<Synchronizer>(SyncPolicy(25), lidar_sub_, camera_sub_);
     sync_->registerCallback(std::bind(&ImageViewer::fusionCallback, this,
                                       std::placeholders::_1,
                                       std::placeholders::_2));
@@ -102,7 +102,6 @@ public:
 
 private:
   size_t n_ = 0;
-  rclcpp::Clock steady_{RCL_STEADY_TIME};
   using SyncPolicy = message_filters::sync_policies::ApproximateTime<
       sensor_msgs::msg::LaserScan, sensor_msgs::msg::Image>;
   using Synchronizer = message_filters::Synchronizer<SyncPolicy>;
